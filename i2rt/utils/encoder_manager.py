@@ -689,8 +689,13 @@ class PassiveJointEncoder:
         self.bus.send(req)
 
     @staticmethod
-    def validate_encoders(channel: str, expected_config: EncoderConfig) -> Dict[int, Dict[str, Any]]:
+    def validate_encoders(
+        channel: str, expected_config: EncoderConfig, *, bus: Optional[BusABC] = None
+    ) -> Dict[int, Dict[str, Any]]:
         """Validate encoder configuration on a CAN channel.
+
+        A supplied bus is borrowed; validation neither opens another connection
+        nor closes the caller's connection. Call before starting any bus reader.
 
         After a freq change to 0 (passive mode), this function makes a best-effort
         wait for the channel to fall silent on its local CAN socket. If the timeout
@@ -704,7 +709,9 @@ class PassiveJointEncoder:
         """
         logging.info(f"Validating encoders on {channel}")
 
-        bus = get_can_bus(channel)
+        owns_bus = bus is None
+        if bus is None:
+            bus = get_can_bus(channel)
         encoder = PassiveJointEncoder(bus)
 
         try:
@@ -797,7 +804,8 @@ class PassiveJointEncoder:
             return all_data
 
         finally:
-            bus.shutdown()
+            if owns_bus:
+                bus.shutdown()
 
 
 @contextmanager

@@ -87,7 +87,7 @@ class PassiveEncoderReader:
         # Keep the validate_encoders result so callers can read per-encoder
         # firmware versions without re-probing the CAN bus (ROB-1311).
         self.encoder_info: Dict[int, Dict[str, Any]] = PassiveJointEncoder.validate_encoders(
-            self.can_interface.channel, encoder_config
+            self.can_interface.channel, encoder_config, bus=self.can_interface.bus
         )
 
     def read_encoder(self, encoder_id: int) -> PassiveEncoderInfo:
@@ -139,9 +139,16 @@ class DMSingleMotorCanInterface(CanInterface):
         receive_mode: ReceiveMode = ReceiveMode.p16,
         name: str = "default_can_DM_interface",
         use_buffered_reader: bool = False,
+        bus: Optional[can.BusABC] = None,
     ):
         super().__init__(
-            channel, bustype, bitrate, receive_mode=receive_mode, name=name, use_buffered_reader=use_buffered_reader
+            channel,
+            bustype,
+            bitrate,
+            receive_mode=receive_mode,
+            name=name,
+            use_buffered_reader=use_buffered_reader,
+            bus=bus,
         )
         self.control_mode = control_mode
         self.cmd_idoffset = ControlMode.get_id_offset(self.control_mode)
@@ -399,6 +406,7 @@ class DMChainCanInterface(MotorChain):
         check_motor_types: bool = False,  # read Gr and refuse a chain not holding its declared motor types
         check_motor_config: bool = False,  # repair CTRL_MODE and compare PMAX/VMAX/TMAX; writes Flash
         loop_critical_motor_ids: Optional[Sequence[int]] = None,  # motors whose feedback the caller's loop acts on
+        bus: Optional[can.BusABC] = None,
     ):
         assert not use_buffered_reader, (
             "buffered reader is not very stable, the latest encoder fix allows us to use the non-buffered reader"
@@ -434,11 +442,14 @@ class DMChainCanInterface(MotorChain):
             # Stated rather than defaulted: this is the path that is about to run the chain, and a motor
             # left in the wrong mode cannot be commanded at all. --survey-only is the caller that says False.
             repair=True,
+            bus=bus,
         )
-        if "can" in channel:
+        if bus is not None or "can" in channel:
             self.motor_interface = DMSingleMotorCanInterface(
                 channel=channel,
                 bustype="socketcan",
+                bitrate=bitrate,
+                bus=bus,
                 receive_mode=receive_mode,
                 name=motor_chain_name,
                 control_mode=control_mode,

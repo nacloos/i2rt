@@ -4,6 +4,9 @@ Run with:
     pytest tests/test_robot_variants.py -v
 """
 
+import tempfile
+from pathlib import Path
+
 import mujoco
 import numpy as np
 import pytest
@@ -207,3 +210,14 @@ def test_grasp_site_consistent_across_grippers(arm_type: ArmType) -> None:
                 atol=1e-3,
                 err_msg=(f"{arm_type.value}: {gripper_type.value} site frame differs from {ref_gripper.value}"),
             )
+
+
+def test_combined_model_uses_the_platform_temporary_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    path = Path(combine_arm_and_gripper_xml(ArmType.YAM, GripperType.LINEAR_4310))
+    try:
+        assert path.parent == tmp_path
+        model = mujoco.MjModel.from_xml_path(str(path))
+        assert model.nmesh > 0
+    finally:
+        path.unlink()

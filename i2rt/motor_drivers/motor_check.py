@@ -132,6 +132,8 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+import can
+
 from i2rt.motor_config_tool.dm_motor_registers import (
     BUS_ERRORS,
     REG_BY_ADDR,
@@ -204,10 +206,10 @@ def _nothing_to_check(channel: str, motor_list: Sequence[Sequence[Any]]) -> None
     logger.info("nothing to check on %s: %d row(s), none of them a motor", channel, len(motor_list))
 
 
-def _open_bus(channel: str, name: str, what: str) -> RawCanInterface:
+def _open_bus(channel: str, name: str, what: str, bus: can.BusABC | None = None) -> RawCanInterface:
     """Open the raw interface both checks read through, or say why the channel is unusable."""
     try:
-        return RawCanInterface(channel=channel, bustype="socketcan", name=name)
+        return RawCanInterface(channel=channel, bustype="socketcan", name=name, bus=bus)
     except BUS_ERRORS as e:
         raise RuntimeError(
             f"could not open {channel} to check the motor {what}: {e}. Check the interface is up "
@@ -224,6 +226,7 @@ def run_startup_checks(
     control_mode: str,
     loop_critical_motor_ids: Sequence[int] | None = None,
     repair: bool = True,
+    bus: can.BusABC | None = None,
 ) -> None:
     """Run whichever startup checks a caller asked for, in the only order that is safe.
 
@@ -231,6 +234,9 @@ def run_startup_checks(
     whichever one remembered them. ``DMChainCanInterface.__init__`` calls this at the top of the
     constructor; ``dm_driver.py --survey-only`` calls it *instead* of building a chain at all, which is
     the only way to read a chain's registers without energising it.
+
+    A supplied bus is borrowed by both checks and remains caller-owned. No other
+    reader may consume its responses while these startup checks run.
 
     Both flags are keyword-only and have no default. Two adjacent positional bools are a swap hazard
     whose failure mode is asymmetric: read as "config only" a swap now raises, but read as "types only"
@@ -256,7 +262,7 @@ def run_startup_checks(
             "advise rewriting PMAX, and write CTRL_MODE to Flash on a motor whose repair is to be "
             "swapped out. Ask for both, or for neither."
         )
-    if "can" not in channel:
+    if bus is None and "can" not in channel:
         raise ValueError(
             f"cannot check the motors on {channel!r}: both checks read registers over socketcan, and "
             "this is not a socketcan channel. Starting anyway would trust every motor's declared type "
@@ -266,9 +272,9 @@ def run_startup_checks(
         )
     # check_motor_types is necessarily True here: neither-flag returned above, and config-without-types
     # was just refused. Positional, because the call signature is asserted that way by the tests.
-    verify_motor_types(channel, motor_list)
+    verify_motor_types(channel, motor_list, bus=bus)
     if check_motor_config:
-        verify_motor_config(channel, motor_list, control_mode, loop_critical_motor_ids, repair=repair)
+        verify_motor_config(channel, motor_list, control_mode, loop_critical_motor_ids, repair=repair, bus=bus)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -394,7 +400,7 @@ def _describe_mismatch(motor_id: int, motor_type: str, actual: float, expected: 
     )
 
 
-def verify_motor_types(channel: str, motor_list: Sequence[Sequence[Any]]) -> None:
+def verify_motor_types(channel: str, motor_list: Sequence[Sequence[Any]], *, bus: can.BusABC | None = None) -> None:
     """Check that every motor on ``channel`` is the type ``motor_list`` declares.
 
     ``motor_list`` rows are ``(can_id, motor_type)``; ``_motor_rows`` coerces them and drops the
@@ -419,7 +425,7 @@ def verify_motor_types(channel: str, motor_list: Sequence[Sequence[Any]]) -> Non
         channel,
         ", ".join(f"{motor_id} {motor_type}" for motor_id, motor_type in motors),
     )
-    iface = _open_bus(channel, "motor_type_check", "types")
+    iface = _open_bus(channel, "motor_type_check", "types", bus)
 
     mismatched: list[str] = []
     try:
@@ -769,6 +775,7 @@ def verify_motor_config(
     loop_critical_motor_ids: Sequence[int] | None = None,
     *,
     repair: bool = True,
+    bus: can.BusABC | None = None,
 ) -> None:
     """Check every motor's control mode and feedback scaling on ``channel``.
 
@@ -828,7 +835,7 @@ def verify_motor_config(
         channel,
         ", ".join(f"{motor_id} {motor_type}" for motor_id, motor_type in motors),
     )
-    iface = _open_bus(channel, "motor_config_check", "configuration")
+    iface = _open_bus(channel, "motor_config_check", "configuration", bus)
 
     try:
         wrong: list[tuple[int, Scalar]] = []

@@ -6,20 +6,25 @@ import can
 
 
 class RawCanInterface:
+    """Register transport. A supplied bus is borrowed and remains caller-owned."""
+
     def __init__(
         self,
         channel: str = "PCAN_USBBUS1",
         bustype: str = "pcan",
         bitrate: int = 1000000,
         name: str = "default_can_interface",
+        bus: Optional[can.BusABC] = None,
     ):
-        self.bus = can.interface.Bus(bustype=bustype, channel=channel, bitrate=bitrate)
+        self._owns_bus = bus is None
+        self.bus = bus if bus is not None else can.interface.Bus(bustype=bustype, channel=channel, bitrate=bitrate)
         self.busstate = self.bus.state
         self.name = name
 
     def close(self) -> None:
         """Shut down the CAN bus."""
-        self.bus.shutdown()
+        if self._owns_bus:
+            self.bus.shutdown()
 
     def _send_message_get_response(self, id: int, data: List[int], max_retry: int = 20) -> can.Message:
         self.try_receive_message(id)

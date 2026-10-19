@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from functools import partial
 from typing import Any, Callable, Optional
 
+import can
 import numpy as np
 
 from i2rt.motor_drivers.dm_driver import (
@@ -63,11 +64,14 @@ def _get_gripper_only_robot(
     gripper_type: GripperType = GripperType.LINEAR_4310,
     sim: bool = False,
     enable_auto_recovery: bool = False,
+    bus: Optional[can.BusABC] = None,
 ) -> "Robot":
     """Create a gripper-only robot (no arm).
 
     Args:
         channel: CAN interface name (e.g. "can0"). Ignored in sim mode.
+        bus: Optional caller-owned CAN bus shared by startup checks and operation.
+            The caller must close it after the robot. Ignored in sim mode.
         gripper_type: Which gripper to load. Must not be NO_GRIPPER.
         sim: If True, return a SimRobot instead of connecting to real hardware.
         enable_auto_recovery: If True, the motor chain tries to clean+re-enable errored motors in its
@@ -120,6 +124,7 @@ def _get_gripper_only_robot(
         # gripper's commanded torque through TMAX, and the force limiter steers by its feedback.
         check_motor_types=True,
         check_motor_config=True,
+        bus=bus,
     )
 
     return MotorChainRobot(
@@ -154,11 +159,14 @@ def get_yam_robot(
     set_realtime_and_pin_callback: Optional[Callable[[int], None]] = None,
     enable_auto_recovery: bool = False,
     use_coulomb_friction: bool = False,
+    bus: Optional[can.BusABC] = None,
 ) -> "Robot":
     """Create a YAM-family robot (real or sim).
 
     Args:
         channel: CAN interface name (e.g. "can0"). Ignored in sim mode.
+        bus: Optional caller-owned CAN bus shared by startup checks and operation.
+            The caller must close it after the robot. Ignored in sim mode.
         arm_type: Which arm variant to use. A hardware revision is its own variant
             (e.g. ``ArmType.YAM_ULTRA_2``). Use ``ArmType.NO_ARM`` for gripper-only.
         gripper_type: Which gripper (or NO_GRIPPER / YAM_TEACHING_HANDLE).
@@ -180,7 +188,7 @@ def get_yam_robot(
     # --- Gripper-only path (no arm) -------------------------------------------
     if arm_type == ArmType.NO_ARM:
         return _get_gripper_only_robot(
-            channel=channel, gripper_type=gripper_type, sim=sim, enable_auto_recovery=enable_auto_recovery
+            channel=channel, gripper_type=gripper_type, sim=sim, enable_auto_recovery=enable_auto_recovery, bus=bus
         )
 
     with_gripper = gripper_type not in (GripperType.YAM_TEACHING_HANDLE, GripperType.NO_GRIPPER)
@@ -272,6 +280,7 @@ def get_yam_robot(
         # motor_list already has the gripper motor appended, so both cover it too.
         check_motor_types=True,
         check_motor_config=True,
+        bus=bus,
     )
     motor_states = motor_chain.read_states()
     logging.debug(f"motor_states: {motor_states}")

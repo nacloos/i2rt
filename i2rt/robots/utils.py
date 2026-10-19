@@ -258,7 +258,7 @@ def combine_arm_and_gripper_xml(
             10 elements: [ipos(3), quat(4), diaginertia(3)].
 
     Returns:
-        Path to the combined XML file written to /tmp/.
+        Path to the combined XML file in the platform temporary directory.
     """
     arm_path = arm_type.get_xml_path()
     gripper_path = gripper_type.get_xml_path()
@@ -393,12 +393,12 @@ def combine_arm_and_gripper_xml(
             diagin = " ".join(str(float(x)) for x in arr[-3:])
             inertial.set("diaginertia", diagin)
 
-    # write combined xml to /tmp/ and return filepath
-    out_path = tempfile.NamedTemporaryFile(
-        suffix=".xml", prefix=f"i2rt_{arm_type.value}_{gripper_type.value}_", delete=False, dir="/tmp"
-    ).name
-    arm_tree.write(out_path, encoding="utf-8", xml_declaration=True)
-    return out_path
+    # Write the combined XML into the platform temporary directory.
+    with tempfile.NamedTemporaryFile(
+        suffix=".xml", prefix=f"i2rt_{arm_type.value}_{gripper_type.value}_", delete=False
+    ) as output:
+        arm_tree.write(output, encoding="utf-8", xml_declaration=True)
+    return output.name
 
 
 # Arm variant -> (model/config family, hardware revision). The family is the on-disk name --

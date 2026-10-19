@@ -8,6 +8,8 @@ from i2rt.motor_drivers.utils import ReceiveMode
 
 
 class CanInterface:
+    """CAN transport wrapper. A supplied bus is borrowed and remains caller-owned."""
+
     def __init__(
         self,
         channel: str = "PCAN_USBBUS1",
@@ -16,9 +18,11 @@ class CanInterface:
         name: str = "default_can_interface",
         receive_mode: ReceiveMode = ReceiveMode.p16,
         use_buffered_reader: bool = False,
+        bus: Optional[can.BusABC] = None,
     ):
         self.channel = channel
-        self.bus = can.interface.Bus(bustype=bustype, channel=channel, bitrate=bitrate)
+        self._owns_bus = bus is None
+        self.bus = bus if bus is not None else can.interface.Bus(bustype=bustype, channel=channel, bitrate=bitrate)
         self.busstate = self.bus.state
         self.name = name
         self.receive_mode = receive_mode
@@ -33,7 +37,8 @@ class CanInterface:
         """Shut down the CAN bus."""
         if self.use_buffered_reader:
             self.notifier.stop()
-        self.bus.shutdown()
+        if self._owns_bus:
+            self.bus.shutdown()
 
     def _send_message_get_response(
         self, id: int, motor_id: int, data: List[int], max_retry: int = 5, expected_id: Optional[int] = None

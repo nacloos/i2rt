@@ -482,7 +482,7 @@ def chain_harness(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
 
     calls: list[tuple[str, Any]] = []
 
-    def _record(channel: str, motor_list: Any) -> None:
+    def _record(channel: str, motor_list: Any, **_kwargs: Any) -> None:
         calls.append((channel, motor_list))
 
     def _socket(*args: Any, **kwargs: Any) -> None:
@@ -521,7 +521,7 @@ def test_the_check_runs_before_the_socket_is_opened(monkeypatch: pytest.MonkeyPa
     """
     from i2rt.motor_drivers import dm_driver
 
-    def _refuse(channel: str, motor_list: Any) -> None:
+    def _refuse(channel: str, motor_list: Any, **_kwargs: Any) -> None:
         raise RuntimeError("motor type check failed")
 
     def _socket(*args: Any, **kwargs: Any) -> None:
@@ -569,7 +569,7 @@ def test_the_config_check_gets_the_chains_control_mode_and_loop_ids(monkeypatch:
     monkeypatch.setattr(dm_driver, "DMSingleMotorCanInterface", lambda *a, **k: (_ for _ in ()).throw(_SocketOpened()))
     with pytest.raises(_SocketOpened):
         _build(check_motor_types=True, check_motor_config=True, control_mode="VEL", loop_critical_motor_ids=(1,))
-    assert seen == [((CHANNEL, CHAIN, "VEL", (1,)), {"repair": True})]
+    assert seen == [((CHANNEL, CHAIN, "VEL", (1,)), {"repair": True, "bus": None})]
 
 
 def test_the_config_check_cannot_be_asked_for_without_the_type_check() -> None:
