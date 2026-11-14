@@ -583,14 +583,15 @@ class MotorChainRobot(Robot):
         """
         pos = self._clip_robot_joint_pos_command(joint_state["pos"])
         vel = joint_state["vel"]
-        self._commands = JointCommands.init_all_zero(len(self.motor_chain))
         kp = joint_state.get("kp", self._kp)
         kd = joint_state.get("kd", self._kd)
+        command = JointCommands.init_all_zero(len(self.motor_chain))
+        command.pos = self.remapper.to_robot_joint_pos_space(pos)
+        command.vel = self.remapper.to_robot_joint_vel_space(vel)
+        command.kp = kp
+        command.kd = kd
         with self._command_lock:
-            self._commands.pos = self.remapper.to_robot_joint_pos_space(pos)
-            self._commands.vel = self.remapper.to_robot_joint_vel_space(vel)
-            self._commands.kp = kp
-            self._commands.kd = kd
+            self._commands = command
 
     def zero_torque_mode(self) -> None:
         logging.info(f"Entering zero_torque_mode for {self}")
