@@ -230,6 +230,10 @@ class MotorChainRobot(Robot):
 
         self._command_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._ki = np.zeros(len(motor_chain))
+        self._integral_limits = np.zeros(len(motor_chain))
+        self._integral_torque = np.zeros(len(motor_chain))
+        self._integral_time = time.monotonic()
         self._mcap_lock = threading.Lock()
         self._mcap_recorder: Optional[RobotMcapRecorder] = None
         self._joint_state: Optional[JointStates] = None
@@ -363,7 +367,8 @@ class MotorChainRobot(Robot):
             friction_comp = (
                 self._coulomb_friction * np.sign(self._joint_state.vel) if self.use_coulomb_friction else 0.0
             )
-            motor_torques = joint_commands.torques + g * self.gravity_comp_factor + friction_comp
+            integral = self._integral_compensation(joint_commands)
+            motor_torques = joint_commands.torques + g * self.gravity_comp_factor + friction_comp + integral
             motor_torques = np.clip(motor_torques, -self._clip_motor_torque, self._clip_motor_torque)
             self._last_motor_torques = motor_torques.copy()
 
@@ -662,6 +667,42 @@ class MotorChainRobot(Robot):
         assert kp.shape == self._kp.shape == kd.shape
         self._kp = kp
         self._kd = kd
+
+    def configure_integral(self, gains: np.ndarray, torque_limits: np.ndarray) -> None:
+        """Configure optional integral feedback in Nm/(rad s), bounded in Nm.
+
+        Zero gains disable it. The bias persists across position commands and
+        is cleared on joints without active position feedback. Call at rest.
+        """
+        gains = np.array(gains, dtype=float, copy=True)
+        torque_limits = np.array(torque_limits, dtype=float, copy=True)
+        shape = (len(self.motor_chain),)
+        if (gains.shape != shape or torque_limits.shape != shape
+                or not np.isfinite(gains).all() or not np.isfinite(torque_limits).all()
+                or np.any(gains < 0) or np.any(torque_limits < 0)):
+            raise ValueError("integral gains and torque limits must be finite nonnegative joint arrays")
+        with self._state_lock:
+            self._ki = gains
+            self._integral_limits = torque_limits
+            self._integral_torque = np.clip(self._integral_torque, -torque_limits, torque_limits)
+            self._integral_torque[gains == 0] = 0
+            self._integral_time = time.monotonic()
+
+    def _integral_compensation(self, commands: JointCommands) -> np.ndarray:
+        # Called with _state_lock held by update(). Never integrate across a stall.
+        now = time.monotonic()
+        dt = now - self._integral_time
+        self._integral_time = now
+        active = (commands.kp > 0) & (self._ki > 0)
+        self._integral_torque[~active] = 0
+        if 0 < dt <= 0.1:
+            actual = self.remapper.to_robot_joint_pos_space(self._joint_state.pos)
+            increment = self._ki * (commands.pos - actual) * dt
+            self._integral_torque = np.clip(
+                self._integral_torque + np.where(active, increment, 0),
+                -self._integral_limits, self._integral_limits,
+            )
+        return self._integral_torque.copy()
 
     def enter_gravity_comp_idle(self) -> None:
         """Reset active commands to gravity-comp idle.
